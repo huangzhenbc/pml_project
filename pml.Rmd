@@ -1,0 +1,165 @@
+---
+title: "Practical Machine Learning"
+author: "Huang,Zhen"
+date: "2016-7-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Getting and Cleaning Data
+
+We use the following code to get the data\:(Should download 2 csvs into your work directory first)
+
+```{r, echo=FALSE}
+setwd("D:\\黄震的电脑\\大学\\学习\\数据科学\\practice\\pml_Huang")
+```
+
+```{r, echo=TRUE}
+train <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+
+A glimpse at the head of training data tells us that there are lots of columns filled with NAs or Blanks, so we first summarize the number of NAs in each column:
+
+```{r, echo=FALSE}
+train[train == ""] <- NA
+cat("Number of NAs or Blanks in each column:\n")
+a = array()
+for (i in 1:160) {
+  a[i] = sum(is.na(train[,i]))
+}
+print(a)
+```
+
+From these results, we can see that numbers of NAs and Blanks in a column are either a lot or none, so a simple data cleaning method is to remove all columns with NA(We also remove the first column because it is useless in our prediction):
+
+```{r, echo=TRUE}
+cols <- colSums(is.na(train)) == 0  # Blanks have been converted to NAs
+train <- train[, cols]
+test <- test[, cols]
+train <- train[,-1] 
+test <- test[,-1] 
+```
+
+## Variable Analysis
+
+Looking at the summary of our data(Appendix 1), we can find that we have *user_name*, *cvtd_timestamp*, *new_window* and our response *classe* as categorical variables and all others as continuous variables. Thus, a good algorithm to consider is random forest because it carries out feature selection automatically and preprocessing is not needed. 
+
+```{r, echo=FALSE}
+sumTrain <- summary(train)
+```
+
+Before our model training, we still need to sketch outliers since outliers can affect our modeling. A boxplot showing the values of our variables are shown below:
+
+```{r, echo=FALSE}
+suppressMessages(library(caret))
+process <- preProcess(train)
+cTrain <- predict(process, train)
+boxplot(cTrain, xaxt = 'n', xlab = "variables", ylab = "values")
+axis(1, 1:60, 1:60)
+title(main = "boxplots of variables after centered and scaled")
+```
+
+We can see that though there are some outliers in variable 38, 39, 40, 51, 52, 53, the outliers are rare. Also, because we do not know the data generating processes and why these outliers occur, omitting them are incorrect, so we can just leave them there. The following test can demonstrate the fact that outliers are rare:
+
+```{r, echo=TRUE}
+suppressMessages(library(outliers))
+absScores <- abs(scores(train[,c(38,39,40,51,52,53)]))
+colSums((absScores) > 3) # We regard absScores > 3 as outliers
+```
+
+Since outliers are rare, and random forest requires minimum model assumptions, we can directly carry out the training and validation process on this data(centering and scaling are not needed).
+
+## Model Training and Validation
+
+As discussed before, we train our model using random forests. We trained and validated our model for ten times using different training sets and validation sets. The following code shows how we train our random forest model:
+
+```{r, echo=TRUE, eval=FALSE}
+suppressMessages(library(randomForest))
+rf <- list()
+seed <- 104999 ## a big prime number, for reproducible purpose
+for (i in 1:10) { ## we train 10 different models to test the accuracy of rf 
+  set.seed(seed + i)
+  inTrain <- createDataPartition(train$classe, p = 0.8, list = FALSE)
+  testing <- train[-inTrain,]
+  rf <- randomForest(classe~., data = train, subset = inTrain)
+  save(rf, file = paste("rf", toString(i), ".RData", sep = ""))
+  prediction <- predict(rf, testing)
+  CM <- confusionMatrix(prediction, testing$classe)
+  cat(paste("test", i, ":\n", sep = ""))
+  print(CM$overall[c("Accuracy", "AccuracyLower", "AccuracyUpper")], sep = "")
+}
+```
+
+```{r, echo=FALSE}
+suppressMessages(library(randomForest))
+rf <- list()
+seed <- 104999 ## a big prime number, for reproducible purpose
+for (i in 1:10) { ## we train 10 different models to test the accuracy of rf 
+  set.seed(seed + i)
+  inTrain <- createDataPartition(train$classe, p = 0.8, list = FALSE)
+  testing <- train[-inTrain,]
+  load(file = paste("rf", toString(i), ".RData", sep = ""))
+  prediction <- predict(rf, testing)
+  CM <- confusionMatrix(prediction, testing$classe)
+  cat(paste("test", i, ":\n", sep = ""))
+  print(CM$overall[c("Accuracy", "AccuracyLower", "AccuracyUpper")], sep = "")
+}
+```
+
+To see the full results including the confusion matrix and other metrics for our model, Appendix 2 provides a comprehensive summary.
+
+From these results, we can see that accuracies are all greater than 99%, which is very accurate so we do not need to train different models. The numerically best model is model 9, so we decide to use it for our final predicction, though there are no obvious difference among the accuracies of these models.
+
+## Conclusion and Prediction
+
+Random forest performs very well on our data, if our dataset is representative, out-of-bag errors will be less than 0.5%. Furthermore, we do not make any assumptions when building our model, so we should expect a good prediction accuracy using model 9 on our test set.
+
+Before we make our prediction, we need to transform our test data into the same format as training data:
+
+```{r, echo=TRUE}
+for (i in 1:length(names(train))) {
+  class(test[,i]) <- class(train[,i])
+  if(class(test[,i]) == "factor") {
+    levels(test[,i]) <- levels(train[,i])
+  }
+}
+```
+
+Then we use model 9 to predict our test data, and here are the results:
+
+```{r, echo=FALSE}
+suppressMessages(library(randomForest))
+rf <- list()
+model <- 9 # model 9
+seed <- 104999 ## a big prime number, for reproducible purpose
+set.seed(seed + model)
+load(file = paste("rf", toString(model), ".RData", sep = ""))
+predict(rf, test)
+```
+
+## Appendix
+
+1. Summary of the Variables
+
+```{r, echo=FALSE}
+sumTrain
+```
+
+2. Summary of validation results:
+```{r, echo=FALSE}
+suppressMessages(library(randomForest))
+rf <- list()
+seed <- 104999 ## a big prime number, for reproducible purpose
+for (i in 1:10) { ## we train 10 different models to test the accuracy of rf 
+  set.seed(seed + i)
+  inTrain <- createDataPartition(train$classe, p = 0.8, list = FALSE)
+  testing <- train[-inTrain,]
+  load(file = paste("rf", toString(i), ".RData", sep = ""))
+  prediction <- predict(rf, testing)
+  print(confusionMatrix(prediction, testing$classe))
+}
+```
